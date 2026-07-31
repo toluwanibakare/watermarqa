@@ -75,6 +75,11 @@ const valPosX = document.getElementById('val-pos-x');
 const valPosY = document.getElementById('val-pos-y');
 const valOpacity = document.getElementById('val-opacity');
 
+const btnDecX = document.getElementById('btn-dec-x');
+const btnIncX = document.getElementById('btn-inc-x');
+const btnDecY = document.getElementById('btn-dec-y');
+const btnIncY = document.getElementById('btn-inc-y');
+
 const photosInput = document.getElementById('photos-input');
 const photosDropzone = document.getElementById('photos-dropzone');
 
@@ -199,7 +204,7 @@ btnRemoveWatermark.addEventListener('click', async (e) => {
     processAllPhotos();
 });
 
-// Setup settings sliders
+// Setup settings sliders and buttons
 function setupControls() {
     const updateLabel = (input, label, suffix = '') => {
         label.textContent = input.value + suffix;
@@ -210,13 +215,35 @@ function setupControls() {
         processAllPhotos();
     });
 
+    // X-axis Slider + Buttons
     controlPosX.addEventListener('input', () => {
-        updateLabel(controlPosX, valPosX, '%');
+        updateLabel(controlPosX, valPosX);
+        processAllPhotos();
+    });
+    btnDecX.addEventListener('click', () => {
+        controlPosX.value = Math.max(parseInt(controlPosX.min), parseInt(controlPosX.value) - 1);
+        updateLabel(controlPosX, valPosX);
+        processAllPhotos();
+    });
+    btnIncX.addEventListener('click', () => {
+        controlPosX.value = Math.min(parseInt(controlPosX.max), parseInt(controlPosX.value) + 1);
+        updateLabel(controlPosX, valPosX);
         processAllPhotos();
     });
 
+    // Y-axis Slider + Buttons
     controlPosY.addEventListener('input', () => {
-        updateLabel(controlPosY, valPosY, '%');
+        updateLabel(controlPosY, valPosY);
+        processAllPhotos();
+    });
+    btnDecY.addEventListener('click', () => {
+        controlPosY.value = Math.max(parseInt(controlPosY.min), parseInt(controlPosY.value) - 1);
+        updateLabel(controlPosY, valPosY);
+        processAllPhotos();
+    });
+    btnIncY.addEventListener('click', () => {
+        controlPosY.value = Math.min(parseInt(controlPosY.max), parseInt(controlPosY.value) + 1);
+        updateLabel(controlPosY, valPosY);
         processAllPhotos();
     });
 
@@ -389,14 +416,20 @@ function applyWatermark(originalImg) {
     // Apply watermark if loaded
     if (watermarkImage) {
         const sizePct = parseFloat(controlSize.value) / 100;
-        const posX = parseFloat(controlPosX.value) / 100;
-        const posY = parseFloat(controlPosY.value) / 100;
+        const posXSlider = parseFloat(controlPosX.value); // 0 to 100
+        const posYSlider = parseFloat(controlPosY.value); // 0 to 100
         const opacity = parseFloat(controlOpacity.value) / 100;
 
         // Calculate size relative to image width
         const wmWidth = canvas.width * sizePct;
         const aspect = watermarkImage.naturalHeight / watermarkImage.naturalWidth;
         const wmHeight = wmWidth * aspect;
+
+        // High range sensitivity scaling:
+        // Slider value 50 (X) maps to 0.5 (center). Range expands 15x.
+        // Slider value 96 (Y) maps to 0.96 (bottom). Range expands 70x.
+        const posX = 0.5 + ((posXSlider - 50) / 100) * 15;
+        const posY = 0.96 + ((posYSlider - 96) / 100) * 70;
 
         // Calculate custom positions
         const x = (canvas.width - wmWidth) * posX;
