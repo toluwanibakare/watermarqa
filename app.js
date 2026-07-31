@@ -56,6 +56,7 @@ class SettingsDB {
 // App State
 let watermarkImage = null;
 let uploadedPhotos = []; // Array of objects: { id, name, originalImage }
+let activeModalPhotoId = null;
 
 // DOM Elements
 const watermarkInput = document.getElementById('watermark-input');
@@ -66,10 +67,12 @@ const watermarkPreview = document.getElementById('watermark-preview');
 const btnRemoveWatermark = document.getElementById('btn-remove-watermark');
 
 const controlSize = document.getElementById('control-size');
-const controlGap = document.getElementById('control-gap');
+const controlPosX = document.getElementById('control-pos-x');
+const controlPosY = document.getElementById('control-pos-y');
 const controlOpacity = document.getElementById('control-opacity');
 const valSize = document.getElementById('val-size');
-const valGap = document.getElementById('val-gap');
+const valPosX = document.getElementById('val-pos-x');
+const valPosY = document.getElementById('val-pos-y');
 const valOpacity = document.getElementById('val-opacity');
 
 const photosInput = document.getElementById('photos-input');
@@ -81,11 +84,17 @@ const previewGrid = document.getElementById('preview-grid');
 const btnClearAll = document.getElementById('btn-clear-all');
 const btnDownloadAll = document.getElementById('btn-download-all');
 
+const previewModal = document.getElementById('preview-modal');
+const modalImg = document.getElementById('modal-img');
+const modalCaption = document.getElementById('modal-caption');
+const modalClose = document.getElementById('modal-close');
+
 // Initialize
 window.addEventListener('DOMContentLoaded', async () => {
     setupDragAndDrop(watermarkDropzone, watermarkInput, handleWatermarkSelect);
     setupDragAndDrop(photosDropzone, photosInput, handlePhotosSelect);
     setupControls();
+    setupModal();
     
     // Load saved watermark
     try {
@@ -100,7 +109,16 @@ window.addEventListener('DOMContentLoaded', async () => {
 
 // Setup Drag & Drop listeners
 function setupDragAndDrop(dropzone, input, fileHandler) {
-    dropzone.addEventListener('click', () => input.click());
+    // Safari fix: Prevent click event loops
+    dropzone.addEventListener('click', (e) => {
+        if (e.target !== input) {
+            input.click();
+        }
+    });
+    
+    input.addEventListener('click', (e) => {
+        e.stopPropagation();
+    });
     
     input.addEventListener('change', (e) => {
         if (e.target.files.length > 0) {
@@ -192,8 +210,13 @@ function setupControls() {
         processAllPhotos();
     });
 
-    controlGap.addEventListener('input', () => {
-        updateLabel(controlGap, valGap, '%');
+    controlPosX.addEventListener('input', () => {
+        updateLabel(controlPosX, valPosX, '%');
+        processAllPhotos();
+    });
+
+    controlPosY.addEventListener('input', () => {
+        updateLabel(controlPosY, valPosY, '%');
         processAllPhotos();
     });
 
@@ -238,6 +261,28 @@ function loadImageFromFile(file) {
     });
 }
 
+// Setup Modal Events
+function setupModal() {
+    const closeModal = () => {
+        previewModal.classList.add('hidden');
+        activeModalPhotoId = null;
+    };
+
+    modalClose.addEventListener('click', closeModal);
+    previewModal.addEventListener('click', (e) => {
+        if (e.target === previewModal) {
+            closeModal();
+        }
+    });
+
+    // Close on ESC key
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && !previewModal.classList.contains('hidden')) {
+            closeModal();
+        }
+    });
+}
+
 // Main processing logic
 function processAllPhotos() {
     previewGrid.innerHTML = '';
@@ -245,6 +290,8 @@ function processAllPhotos() {
 
     if (uploadedPhotos.length === 0) {
         previewCard.classList.add('hidden');
+        previewModal.classList.add('hidden');
+        activeModalPhotoId = null;
         return;
     }
 
@@ -258,8 +305,13 @@ function processAllPhotos() {
         btnRemove.className = 'btn-remove-item';
         btnRemove.innerHTML = '&times;';
         btnRemove.title = 'Remove image';
-        btnRemove.onclick = () => {
+        btnRemove.onclick = (e) => {
+            e.stopPropagation();
             uploadedPhotos = uploadedPhotos.filter(p => p.id !== photo.id);
+            if (activeModalPhotoId === photo.id) {
+                previewModal.classList.add('hidden');
+                activeModalPhotoId = null;
+            }
             processAllPhotos();
         };
         container.appendChild(btnRemove);
@@ -267,6 +319,11 @@ function processAllPhotos() {
         // Preview canvas
         const imgWrapper = document.createElement('div');
         imgWrapper.className = 'preview-img-wrapper';
+        imgWrapper.onclick = () => {
+            activeModalPhotoId = photo.id;
+            updateModalView();
+            previewModal.classList.remove('hidden');
+        };
         
         const previewImg = document.createElement('img');
         const watermarkedDataUrl = applyWatermark(photo.originalImage);
@@ -289,7 +346,7 @@ function processAllPhotos() {
         const btnDownload = document.createElement('a');
         btnDownload.className = 'btn btn-secondary btn-sm';
         btnDownload.href = watermarkedDataUrl;
-        btnDownload.download = 'watermarked_' + photo.name;
+        btnDownload.download = 'watermarqt_' + photo.name;
         btnDownload.innerHTML = 'Download';
         actionsDiv.appendChild(btnDownload);
 
@@ -298,6 +355,23 @@ function processAllPhotos() {
 
         previewGrid.appendChild(container);
     });
+
+    // Update modal if currently viewing an active photo
+    if (activeModalPhotoId) {
+        updateModalView();
+    }
+}
+
+// Update the modal contents live
+function updateModalView() {
+    const photo = uploadedPhotos.find(p => p.id === activeModalPhotoId);
+    if (photo) {
+        modalImg.src = applyWatermark(photo.originalImage);
+        modalCaption.textContent = photo.name;
+    } else {
+        previewModal.classList.add('hidden');
+        activeModalPhotoId = null;
+    }
 }
 
 // Core Watermarking Canvas logic
@@ -315,7 +389,8 @@ function applyWatermark(originalImg) {
     // Apply watermark if loaded
     if (watermarkImage) {
         const sizePct = parseFloat(controlSize.value) / 100;
-        const gapPct = parseFloat(controlGap.value) / 100;
+        const posX = parseFloat(controlPosX.value) / 100;
+        const posY = parseFloat(controlPosY.value) / 100;
         const opacity = parseFloat(controlOpacity.value) / 100;
 
         // Calculate size relative to image width
@@ -323,9 +398,9 @@ function applyWatermark(originalImg) {
         const aspect = watermarkImage.naturalHeight / watermarkImage.naturalWidth;
         const wmHeight = wmWidth * aspect;
 
-        // Center horizontally and offset from bottom
-        const x = (canvas.width - wmWidth) / 2;
-        const y = canvas.height - wmHeight - (canvas.height * gapPct);
+        // Calculate custom positions
+        const x = (canvas.width - wmWidth) * posX;
+        const y = (canvas.height - wmHeight) * posY;
 
         ctx.save();
         ctx.globalAlpha = opacity;
@@ -356,14 +431,14 @@ btnDownloadAll.addEventListener('click', async () => {
             const dataUrl = applyWatermark(photo.originalImage);
             // Split metadata prefix to get raw base64 string
             const base64Data = dataUrl.split(',')[1];
-            zip.file('watermarked_' + photo.name, base64Data, { base64: true });
+            zip.file('watermarqt_' + photo.name, base64Data, { base64: true });
         });
 
         const content = await zip.generateAsync({ type: 'blob' });
         
         const link = document.createElement('a');
         link.href = URL.createObjectURL(content);
-        link.download = 'watermarked_photos.zip';
+        link.download = 'watermarqt_photos.zip';
         link.click();
         
         // Cleanup URL object
@@ -373,6 +448,6 @@ btnDownloadAll.addEventListener('click', async () => {
         alert('Could not generate ZIP archive. Please download images individually.');
     } finally {
         btnDownloadAll.disabled = false;
-        btnDownloadAll.innerHTML = '<span class="btn-icon">⚡</span> Download All (ZIP)';
+        btnDownloadAll.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Download All (ZIP)`;
     }
 });

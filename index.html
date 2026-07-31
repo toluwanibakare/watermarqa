@@ -68,11 +68,20 @@
 
                     <div class="control-group">
                         <div class="control-label">
-                            <label for="control-gap">Bottom Gap</label>
-                            <span class="control-value" id="val-gap">4%</span>
+                            <label for="control-pos-x">X Position (Horizontal)</label>
+                            <span class="control-value" id="val-pos-x">50%</span>
                         </div>
-                        <input type="range" id="control-gap" min="1" max="15" value="4" class="slider">
-                        <span class="help-text">Distance from the bottom margin of the photo.</span>
+                        <input type="range" id="control-pos-x" min="0" max="100" value="50" class="slider">
+                        <span class="help-text">50% is centered horizontally.</span>
+                    </div>
+
+                    <div class="control-group">
+                        <div class="control-label">
+                            <label for="control-pos-y">Y Position (Vertical)</label>
+                            <span class="control-value" id="val-pos-y">96%</span>
+                        </div>
+                        <input type="range" id="control-pos-y" min="0" max="100" value="96" class="slider">
+                        <span class="help-text">96% places it at the bottom with a small gap.</span>
                     </div>
 
                     <div class="control-group">
@@ -128,6 +137,15 @@
         <footer class="app-footer">
             <p>&copy; 2026. Built by <a href="https://www.tmb.it.com" target="_blank" rel="noopener">TMB</a>. Your photos never leave your device.</p>
         </footer>
+    </div>
+
+    <!-- Preview Modal -->
+    <div id="preview-modal" class="modal hidden">
+        <span class="modal-close" id="modal-close">&times;</span>
+        <div class="modal-content">
+            <img id="modal-img" src="" alt="Large Preview">
+            <p id="modal-caption"></p>
+        </div>
     </div>
 
     <!-- Script -->
