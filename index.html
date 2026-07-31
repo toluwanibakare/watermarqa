@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Watermarqa - Instant Batch Watermarking</title>
+    <meta name="description" content="Add watermarks to multiple photos at once with smart auto-centering, relative sizing, and instant zip download. Works entirely in your browser.">
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <!-- Stylesheet -->
+    <link rel="stylesheet" href="styles.css">
+    <!-- JSZip for batch downloads -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js" defer></script>
+</head>
+<body>
+    <div class="app-container">
+        <!-- Header -->
+        <header class="app-header">
+            <div class="logo-area">
+                <svg class="logo-icon-svg" width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22a7 7 0 0 0 7-7c0-4.3-7-11-7-11S5 11 5 15a7 7 0 0 0 7 7z"/></svg>
+                <h1>Watermarqa</h1>
+            </div>
+            <p class="tagline">Batch watermark photos in seconds—centered perfectly, scaled automatically.</p>
+        </header>
+
+        <!-- Main Layout Grid -->
+        <main class="app-main">
+            <!-- Left Sidebar: Settings & Watermark -->
+            <section class="sidebar-section">
+                <!-- Step 1: Watermark Upload & Storage -->
+                <div class="card watermark-card">
+                    <div class="card-header">
+                        <span class="step-badge">1</span>
+                        <h2>Watermark Setup</h2>
+                    </div>
+                    <p class="card-desc">Upload your watermark image (PNG with transparency works best). It is saved locally in your browser.</p>
+                    
+                    <div class="dropzone" id="watermark-dropzone">
+                        <input type="file" id="watermark-input" accept="image/*" class="file-input">
+                        <div class="dropzone-prompt" id="watermark-prompt">
+                            <svg class="upload-icon-svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/></svg>
+                            <p>Drag watermark here or <strong>browse</strong></p>
+                        </div>
+                        <div class="watermark-preview-container hidden" id="watermark-preview-container">
+                            <img id="watermark-preview" src="" alt="Watermark Preview">
+                            <button type="button" class="btn btn-secondary btn-sm" id="btn-remove-watermark">Change</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Step 2: Customization Controls -->
+                <div class="card controls-card">
+                    <div class="card-header">
+                        <span class="step-badge">2</span>
+                        <h2>Watermark Settings</h2>
+                    </div>
+                    
+                    <div class="control-group">
+                        <div class="control-label">
+                            <label for="control-size">Size (Relative to Width)</label>
+                            <span class="control-value" id="val-size">18%</span>
+                        </div>
+                        <input type="range" id="control-size" min="5" max="50" value="18" class="slider">
+                        <span class="help-text">Adjusts watermark size proportional to each photo's width.</span>
+                    </div>
+
+                    <div class="control-group">
+                        <div class="control-label">
+                            <label for="control-gap">Bottom Gap</label>
+                            <span class="control-value" id="val-gap">4%</span>
+                        </div>
+                        <input type="range" id="control-gap" min="1" max="15" value="4" class="slider">
+                        <span class="help-text">Distance from the bottom margin of the photo.</span>
+                    </div>
+
+                    <div class="control-group">
+                        <div class="control-label">
+                            <label for="control-opacity">Opacity</label>
+                            <span class="control-value" id="val-opacity">100%</span>
+                        </div>
+                        <input type="range" id="control-opacity" min="10" max="100" value="100" class="slider">
+                    </div>
+                </div>
+            </section>
+
+            <!-- Right Workspace: Photo Upload & Previews -->
+            <section class="workspace-section">
+                <!-- Step 3: Photos Upload -->
+                <div class="card photos-card">
+                    <div class="card-header">
+                        <span class="step-badge">3</span>
+                        <h2>Upload Photos</h2>
+                    </div>
+                    
+                    <div class="dropzone" id="photos-dropzone">
+                        <input type="file" id="photos-input" accept="image/*" multiple class="file-input">
+                        <div class="dropzone-prompt">
+                            <svg class="upload-icon-svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+                            <p>Drag photos here or <strong>browse</strong></p>
+                            <span class="sub-prompt">Select multiple photos at once</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Step 4: Preview & Batch Action Grid -->
+                <div class="card preview-card hidden" id="preview-card">
+                    <div class="preview-header">
+                        <h2>Watermarked Previews (<span id="photo-count">0</span>)</h2>
+                        <div class="action-buttons">
+                            <button class="btn btn-secondary" id="btn-clear-all">Clear All</button>
+                            <button class="btn btn-primary" id="btn-download-all">
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                                Download All (ZIP)
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="preview-grid" id="preview-grid">
+                        <!-- Dynamic items will go here -->
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <!-- Footer -->
+        <footer class="app-footer">
+            <p>&copy; 2026. Built by <a href="https://www.tmb.it.com" target="_blank" rel="noopener">TMB</a>. Your photos never leave your device.</p>
+        </footer>
+    </div>
+
+    <!-- Script -->
+    <script src="app.js" defer></script>
+</body>
+</html>

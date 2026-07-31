@@ -1,0 +1,378 @@
+// IndexedDB Helper for persistent watermark storage
+const DB_NAME = 'WatermarqaDB';
+const DB_VERSION = 1;
+const STORE_NAME = 'settings';
+const WATERMARK_KEY = 'saved_watermark';
+
+class SettingsDB {
+    static open() {
+        return new Promise((resolve, reject) => {
+            const request = indexedDB.open(DB_NAME, DB_VERSION);
+            request.onerror = () => reject(request.error);
+            request.onsuccess = () => resolve(request.result);
+            request.onupgradeneeded = (e) => {
+                const db = e.target.result;
+                if (!db.objectStoreNames.contains(STORE_NAME)) {
+                    db.createObjectStore(STORE_NAME);
+                }
+            };
+        });
+    }
+
+    static async getWatermark() {
+        const db = await this.open();
+        return new Promise((resolve, reject) => {
+            const transaction = db.transaction(STORE_NAME, 'readonly');
+            const store = transaction.objectStore(STORE_NAME);
+            const request = store.get(WATERMARK_KEY);
+            request.onerror = () => reject(request.error);
+            request.onsuccess = () => resolve(request.result);
+        });
+    }
+
+    static async saveWatermark(blob) {
+        const db = await this.open();
+        return new Promise((resolve, reject) => {
+            const transaction = db.transaction(STORE_NAME, 'readwrite');
+            const store = transaction.objectStore(STORE_NAME);
+            const request = store.put(blob, WATERMARK_KEY);
+            request.onerror = () => reject(request.error);
+            request.onsuccess = () => resolve();
+        });
+    }
+
+    static async clearWatermark() {
+        const db = await this.open();
+        return new Promise((resolve, reject) => {
+            const transaction = db.transaction(STORE_NAME, 'readwrite');
+            const store = transaction.objectStore(STORE_NAME);
+            const request = store.delete(WATERMARK_KEY);
+            request.onerror = () => reject(request.error);
+            request.onsuccess = () => resolve();
+        });
+    }
+}
+
+// App State
+let watermarkImage = null;
+let uploadedPhotos = []; // Array of objects: { id, name, originalImage }
+
+// DOM Elements
+const watermarkInput = document.getElementById('watermark-input');
+const watermarkDropzone = document.getElementById('watermark-dropzone');
+const watermarkPrompt = document.getElementById('watermark-prompt');
+const watermarkPreviewContainer = document.getElementById('watermark-preview-container');
+const watermarkPreview = document.getElementById('watermark-preview');
+const btnRemoveWatermark = document.getElementById('btn-remove-watermark');
+
+const controlSize = document.getElementById('control-size');
+const controlGap = document.getElementById('control-gap');
+const controlOpacity = document.getElementById('control-opacity');
+const valSize = document.getElementById('val-size');
+const valGap = document.getElementById('val-gap');
+const valOpacity = document.getElementById('val-opacity');
+
+const photosInput = document.getElementById('photos-input');
+const photosDropzone = document.getElementById('photos-dropzone');
+
+const previewCard = document.getElementById('preview-card');
+const photoCount = document.getElementById('photo-count');
+const previewGrid = document.getElementById('preview-grid');
+const btnClearAll = document.getElementById('btn-clear-all');
+const btnDownloadAll = document.getElementById('btn-download-all');
+
+// Initialize
+window.addEventListener('DOMContentLoaded', async () => {
+    setupDragAndDrop(watermarkDropzone, watermarkInput, handleWatermarkSelect);
+    setupDragAndDrop(photosDropzone, photosInput, handlePhotosSelect);
+    setupControls();
+    
+    // Load saved watermark
+    try {
+        const savedBlob = await SettingsDB.getWatermark();
+        if (savedBlob) {
+            await loadWatermarkFromBlob(savedBlob);
+        }
+    } catch (err) {
+        console.error('Failed to load saved watermark', err);
+    }
+});
+
+// Setup Drag & Drop listeners
+function setupDragAndDrop(dropzone, input, fileHandler) {
+    dropzone.addEventListener('click', () => input.click());
+    
+    input.addEventListener('change', (e) => {
+        if (e.target.files.length > 0) {
+            fileHandler(e.target.files);
+        }
+    });
+
+    ['dragenter', 'dragover'].forEach(eventName => {
+        dropzone.addEventListener(eventName, (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            dropzone.classList.add('dragover');
+        }, false);
+    });
+
+    ['dragleave', 'drop'].forEach(eventName => {
+        dropzone.addEventListener(eventName, (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            dropzone.classList.remove('dragover');
+        }, false);
+    });
+
+    dropzone.addEventListener('drop', (e) => {
+        const dt = e.dataTransfer;
+        const files = dt.files;
+        if (files.length > 0) {
+            fileHandler(files);
+        }
+    }, false);
+}
+
+// Handle Watermark Loading
+async function handleWatermarkSelect(files) {
+    const file = files[0];
+    if (!file || !file.type.startsWith('image/')) return;
+
+    try {
+        await SettingsDB.saveWatermark(file);
+        await loadWatermarkFromBlob(file);
+    } catch (err) {
+        console.error('Failed to save watermark', err);
+    }
+}
+
+function loadWatermarkFromBlob(blob) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            const img = new Image();
+            img.onload = () => {
+                watermarkImage = img;
+                watermarkPreview.src = e.target.result;
+                watermarkPrompt.classList.add('hidden');
+                watermarkPreviewContainer.classList.remove('hidden');
+                
+                // Reprocess all photos with the new watermark
+                processAllPhotos();
+                resolve();
+            };
+            img.onerror = reject;
+            img.src = e.target.result;
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+    });
+}
+
+btnRemoveWatermark.addEventListener('click', async (e) => {
+    e.stopPropagation(); // Avoid triggering file selection
+    watermarkImage = null;
+    watermarkPreview.src = '';
+    watermarkPreviewContainer.classList.add('hidden');
+    watermarkPrompt.classList.remove('hidden');
+    watermarkInput.value = '';
+    
+    await SettingsDB.clearWatermark();
+    processAllPhotos();
+});
+
+// Setup settings sliders
+function setupControls() {
+    const updateLabel = (input, label, suffix = '') => {
+        label.textContent = input.value + suffix;
+    };
+
+    controlSize.addEventListener('input', () => {
+        updateLabel(controlSize, valSize, '%');
+        processAllPhotos();
+    });
+
+    controlGap.addEventListener('input', () => {
+        updateLabel(controlGap, valGap, '%');
+        processAllPhotos();
+    });
+
+    controlOpacity.addEventListener('input', () => {
+        updateLabel(controlOpacity, valOpacity, '%');
+        processAllPhotos();
+    });
+}
+
+// Handle Photo Uploads
+async function handlePhotosSelect(files) {
+    const validFiles = Array.from(files).filter(file => file.type.startsWith('image/'));
+    
+    for (const file of validFiles) {
+        const originalImage = await loadImageFromFile(file);
+        uploadedPhotos.push({
+            id: Date.now() + Math.random().toString(36).substr(2, 9),
+            name: file.name,
+            originalImage: originalImage
+        });
+    }
+
+    if (uploadedPhotos.length > 0) {
+        previewCard.classList.remove('hidden');
+    }
+
+    processAllPhotos();
+    photosInput.value = ''; // Reset input to allow re-upload of same file
+}
+
+function loadImageFromFile(file) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            const img = new Image();
+            img.onload = () => resolve(img);
+            img.onerror = reject;
+            img.src = e.target.result;
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+    });
+}
+
+// Main processing logic
+function processAllPhotos() {
+    previewGrid.innerHTML = '';
+    photoCount.textContent = uploadedPhotos.length;
+
+    if (uploadedPhotos.length === 0) {
+        previewCard.classList.add('hidden');
+        return;
+    }
+
+    uploadedPhotos.forEach(photo => {
+        const container = document.createElement('div');
+        container.className = 'preview-item';
+        container.dataset.id = photo.id;
+
+        // Header/Delete button
+        const btnRemove = document.createElement('button');
+        btnRemove.className = 'btn-remove-item';
+        btnRemove.innerHTML = '&times;';
+        btnRemove.title = 'Remove image';
+        btnRemove.onclick = () => {
+            uploadedPhotos = uploadedPhotos.filter(p => p.id !== photo.id);
+            processAllPhotos();
+        };
+        container.appendChild(btnRemove);
+
+        // Preview canvas
+        const imgWrapper = document.createElement('div');
+        imgWrapper.className = 'preview-img-wrapper';
+        
+        const previewImg = document.createElement('img');
+        const watermarkedDataUrl = applyWatermark(photo.originalImage);
+        previewImg.src = watermarkedDataUrl;
+        imgWrapper.appendChild(previewImg);
+        container.appendChild(imgWrapper);
+
+        // Info and Download
+        const infoDiv = document.createElement('div');
+        infoDiv.className = 'preview-info';
+
+        const nameSpan = document.createElement('span');
+        nameSpan.className = 'preview-name';
+        nameSpan.textContent = photo.name;
+        infoDiv.appendChild(nameSpan);
+
+        const actionsDiv = document.createElement('div');
+        actionsDiv.className = 'preview-actions';
+
+        const btnDownload = document.createElement('a');
+        btnDownload.className = 'btn btn-secondary btn-sm';
+        btnDownload.href = watermarkedDataUrl;
+        btnDownload.download = 'watermarked_' + photo.name;
+        btnDownload.innerHTML = 'Download';
+        actionsDiv.appendChild(btnDownload);
+
+        infoDiv.appendChild(actionsDiv);
+        container.appendChild(infoDiv);
+
+        previewGrid.appendChild(container);
+    });
+}
+
+// Core Watermarking Canvas logic
+function applyWatermark(originalImg) {
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+
+    // Make canvas same resolution as original photo
+    canvas.width = originalImg.naturalWidth;
+    canvas.height = originalImg.naturalHeight;
+
+    // Draw main image
+    ctx.drawImage(originalImg, 0, 0);
+
+    // Apply watermark if loaded
+    if (watermarkImage) {
+        const sizePct = parseFloat(controlSize.value) / 100;
+        const gapPct = parseFloat(controlGap.value) / 100;
+        const opacity = parseFloat(controlOpacity.value) / 100;
+
+        // Calculate size relative to image width
+        const wmWidth = canvas.width * sizePct;
+        const aspect = watermarkImage.naturalHeight / watermarkImage.naturalWidth;
+        const wmHeight = wmWidth * aspect;
+
+        // Center horizontally and offset from bottom
+        const x = (canvas.width - wmWidth) / 2;
+        const y = canvas.height - wmHeight - (canvas.height * gapPct);
+
+        ctx.save();
+        ctx.globalAlpha = opacity;
+        ctx.drawImage(watermarkImage, x, y, wmWidth, wmHeight);
+        ctx.restore();
+    }
+
+    return canvas.toDataURL('image/jpeg', 0.92);
+}
+
+// Clear all
+btnClearAll.addEventListener('click', () => {
+    uploadedPhotos = [];
+    processAllPhotos();
+});
+
+// Download All (ZIP)
+btnDownloadAll.addEventListener('click', async () => {
+    if (uploadedPhotos.length === 0) return;
+
+    btnDownloadAll.disabled = true;
+    btnDownloadAll.textContent = 'Generating ZIP...';
+
+    try {
+        const zip = new JSZip();
+        
+        uploadedPhotos.forEach(photo => {
+            const dataUrl = applyWatermark(photo.originalImage);
+            // Split metadata prefix to get raw base64 string
+            const base64Data = dataUrl.split(',')[1];
+            zip.file('watermarked_' + photo.name, base64Data, { base64: true });
+        });
+
+        const content = await zip.generateAsync({ type: 'blob' });
+        
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(content);
+        link.download = 'watermarked_photos.zip';
+        link.click();
+        
+        // Cleanup URL object
+        setTimeout(() => URL.revokeObjectURL(link.href), 100);
+    } catch (err) {
+        console.error('Error creating ZIP archive', err);
+        alert('Could not generate ZIP archive. Please download images individually.');
+    } finally {
+        btnDownloadAll.disabled = false;
+        btnDownloadAll.innerHTML = '<span class="btn-icon">⚡</span> Download All (ZIP)';
+    }
+});
