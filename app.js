@@ -425,11 +425,10 @@ function applyWatermark(originalImg) {
         const aspect = watermarkImage.naturalHeight / watermarkImage.naturalWidth;
         const wmHeight = wmWidth * aspect;
 
-        // 10x higher range sensitivity scaling under the hood:
-        // Slider value 50 (X) maps to 0.5. Deviations scaled by 1.5 (acts like range is -1000 to 1000).
-        // Slider value 96 (Y) maps to 0.96. Deviations scaled by 7.0.
-        const posX = 0.5 + (posXSlider - 50) * 1.5;
-        const posY = 0.96 + (posYSlider - 96) * 7.0;
+        // Map -100 to 100 slider inputs (where 0 is default center/bottom alignment)
+        // Deviations are scaled by 15 for X and 70 for Y to achieve high virtual range bounds.
+        const posX = 0.5 + (posXSlider / 100) * 15;
+        const posY = 0.96 + (posYSlider / 100) * 70;
 
         // Calculate custom positions
         const x = (canvas.width - wmWidth) * posX;
