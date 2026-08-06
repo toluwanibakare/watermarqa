@@ -57,6 +57,7 @@ class SettingsDB {
 let watermarkImage = null;
 let uploadedPhotos = []; // Array of objects: { id, name, originalImage }
 let activeModalPhotoId = null;
+let renderUpdatePending = false;
 
 // DOM Elements
 const watermarkInput = document.getElementById('watermark-input');
@@ -181,7 +182,7 @@ function loadWatermarkFromBlob(blob) {
                 watermarkPreviewContainer.classList.remove('hidden');
                 
                 // Reprocess all photos with the new watermark
-                processAllPhotos();
+                queueProcessAllPhotos();
                 resolve();
             };
             img.onerror = reject;
@@ -201,8 +202,18 @@ btnRemoveWatermark.addEventListener('click', async (e) => {
     watermarkInput.value = '';
     
     await SettingsDB.clearWatermark();
-    processAllPhotos();
+    queueProcessAllPhotos();
 });
+
+// Throttled UI updater using requestAnimationFrame
+function queueProcessAllPhotos() {
+    if (renderUpdatePending) return;
+    renderUpdatePending = true;
+    requestAnimationFrame(() => {
+        processAllPhotos();
+        renderUpdatePending = false;
+    });
+}
 
 // Setup settings sliders and buttons
 function setupControls() {
@@ -212,44 +223,44 @@ function setupControls() {
 
     controlSize.addEventListener('input', () => {
         updateLabel(controlSize, valSize, '%');
-        processAllPhotos();
+        queueProcessAllPhotos();
     });
 
     // X-axis Slider + Buttons
     controlPosX.addEventListener('input', () => {
         updateLabel(controlPosX, valPosX);
-        processAllPhotos();
+        queueProcessAllPhotos();
     });
     btnDecX.addEventListener('click', () => {
         controlPosX.value = Math.max(parseInt(controlPosX.min), parseInt(controlPosX.value) - 1);
         updateLabel(controlPosX, valPosX);
-        processAllPhotos();
+        queueProcessAllPhotos();
     });
     btnIncX.addEventListener('click', () => {
         controlPosX.value = Math.min(parseInt(controlPosX.max), parseInt(controlPosX.value) + 1);
         updateLabel(controlPosX, valPosX);
-        processAllPhotos();
+        queueProcessAllPhotos();
     });
 
     // Y-axis Slider + Buttons
     controlPosY.addEventListener('input', () => {
         updateLabel(controlPosY, valPosY);
-        processAllPhotos();
+        queueProcessAllPhotos();
     });
     btnDecY.addEventListener('click', () => {
         controlPosY.value = Math.max(parseInt(controlPosY.min), parseInt(controlPosY.value) - 1);
         updateLabel(controlPosY, valPosY);
-        processAllPhotos();
+        queueProcessAllPhotos();
     });
     btnIncY.addEventListener('click', () => {
         controlPosY.value = Math.min(parseInt(controlPosY.max), parseInt(controlPosY.value) + 1);
         updateLabel(controlPosY, valPosY);
-        processAllPhotos();
+        queueProcessAllPhotos();
     });
 
     controlOpacity.addEventListener('input', () => {
         updateLabel(controlOpacity, valOpacity, '%');
-        processAllPhotos();
+        queueProcessAllPhotos();
     });
 }
 
@@ -270,7 +281,7 @@ async function handlePhotosSelect(files) {
         previewCard.classList.remove('hidden');
     }
 
-    processAllPhotos();
+    queueProcessAllPhotos();
     photosInput.value = ''; // Reset input to allow re-upload of same file
 }
 
@@ -310,7 +321,7 @@ function setupModal() {
     });
 }
 
-// Main processing logic
+// Main processing logic (Renders fast thumbnails to prevent browser crashes)
 function processAllPhotos() {
     previewGrid.innerHTML = '';
     photoCount.textContent = uploadedPhotos.length;
@@ -339,11 +350,11 @@ function processAllPhotos() {
                 previewModal.classList.add('hidden');
                 activeModalPhotoId = null;
             }
-            processAllPhotos();
+            queueProcessAllPhotos();
         };
         container.appendChild(btnRemove);
 
-        // Preview canvas
+        // Preview canvas (Max size 600px width/height for fast live updates)
         const imgWrapper = document.createElement('div');
         imgWrapper.className = 'preview-img-wrapper';
         imgWrapper.onclick = () => {
@@ -353,8 +364,8 @@ function processAllPhotos() {
         };
         
         const previewImg = document.createElement('img');
-        const watermarkedDataUrl = applyWatermark(photo.originalImage);
-        previewImg.src = watermarkedDataUrl;
+        const watermarkedPreviewUrl = applyWatermark(photo.originalImage, 600); // 600px thumbnail
+        previewImg.src = watermarkedPreviewUrl;
         imgWrapper.appendChild(previewImg);
         container.appendChild(imgWrapper);
 
@@ -370,11 +381,17 @@ function processAllPhotos() {
         const actionsDiv = document.createElement('div');
         actionsDiv.className = 'preview-actions';
 
-        const btnDownload = document.createElement('a');
+        // High-res rendering done dynamically ON CLICK to prevent iOS Safari memory crashes
+        const btnDownload = document.createElement('button');
         btnDownload.className = 'btn btn-secondary btn-sm';
-        btnDownload.href = watermarkedDataUrl;
-        btnDownload.download = 'watermarqt_' + photo.name;
-        btnDownload.innerHTML = 'Download';
+        btnDownload.textContent = 'Download';
+        btnDownload.onclick = () => {
+            const highResDataUrl = applyWatermark(photo.originalImage); // Full resolution in memory
+            const link = document.createElement('a');
+            link.href = highResDataUrl;
+            link.download = 'watermarqt_' + photo.name;
+            link.click();
+        };
         actionsDiv.appendChild(btnDownload);
 
         infoDiv.appendChild(actionsDiv);
@@ -389,11 +406,11 @@ function processAllPhotos() {
     }
 }
 
-// Update the modal contents live
+// Update the modal contents live (Uses moderate resolution for quality/speed balance)
 function updateModalView() {
     const photo = uploadedPhotos.find(p => p.id === activeModalPhotoId);
     if (photo) {
-        modalImg.src = applyWatermark(photo.originalImage);
+        modalImg.src = applyWatermark(photo.originalImage, 1200); // 1200px sharp preview
         modalCaption.textContent = photo.name;
     } else {
         previewModal.classList.add('hidden');
@@ -402,35 +419,43 @@ function updateModalView() {
 }
 
 // Core Watermarking Canvas logic
-function applyWatermark(originalImg) {
+function applyWatermark(originalImg, maxDimension = null) {
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d');
 
-    // Make canvas same resolution as original photo
-    canvas.width = originalImg.naturalWidth;
-    canvas.height = originalImg.naturalHeight;
+    // Downscale target if maxDimension is provided (for fast preview memory conservation)
+    let scale = 1.0;
+    if (maxDimension) {
+        const maxOriginal = Math.max(originalImg.naturalWidth, originalImg.naturalHeight);
+        if (maxOriginal > maxDimension) {
+            scale = maxDimension / maxOriginal;
+        }
+    }
 
-    // Draw main image
-    ctx.drawImage(originalImg, 0, 0);
+    // Set canvas dimensions
+    canvas.width = originalImg.naturalWidth * scale;
+    canvas.height = originalImg.naturalHeight * scale;
+
+    // Draw main image (scaled down if necessary)
+    ctx.drawImage(originalImg, 0, 0, canvas.width, canvas.height);
 
     // Apply watermark if loaded
     if (watermarkImage) {
         const sizePct = parseFloat(controlSize.value) / 100;
-        const posXSlider = parseFloat(controlPosX.value); // 0 to 100
-        const posYSlider = parseFloat(controlPosY.value); // 0 to 100
+        const posXSlider = parseFloat(controlPosX.value); // -100 to 100
+        const posYSlider = parseFloat(controlPosY.value); // -100 to 100
         const opacity = parseFloat(controlOpacity.value) / 100;
 
-        // Calculate size relative to image width
+        // Calculate size relative to canvas width
         const wmWidth = canvas.width * sizePct;
         const aspect = watermarkImage.naturalHeight / watermarkImage.naturalWidth;
         const wmHeight = wmWidth * aspect;
 
-        // Map -100 to 100 slider inputs (where 0 is default center/bottom alignment)
-        // Deviations are scaled by 15 for X and 70 for Y to achieve high virtual range bounds.
+        // Map relative offset coefficients
         const posX = 0.5 + (posXSlider / 100) * 15;
         const posY = 0.96 + (posYSlider / 100) * 70;
 
-        // Calculate custom positions
+        // Calculate final positions
         const x = (canvas.width - wmWidth) * posX;
         const y = (canvas.height - wmHeight) * posY;
 
@@ -446,7 +471,7 @@ function applyWatermark(originalImg) {
 // Clear all
 btnClearAll.addEventListener('click', () => {
     uploadedPhotos = [];
-    processAllPhotos();
+    queueProcessAllPhotos();
 });
 
 // Download All (ZIP)
@@ -460,7 +485,7 @@ btnDownloadAll.addEventListener('click', async () => {
         const zip = new JSZip();
         
         uploadedPhotos.forEach(photo => {
-            const dataUrl = applyWatermark(photo.originalImage);
+            const dataUrl = applyWatermark(photo.originalImage); // Render high resolution in memory
             // Split metadata prefix to get raw base64 string
             const base64Data = dataUrl.split(',')[1];
             zip.file('watermarqt_' + photo.name, base64Data, { base64: true });
